@@ -32,9 +32,16 @@ class SparkWorker(object):
                            loss=self.master_loss, metrics=self.master_metrics)
         self.model.set_weights(self.parameters.value)
 
-        feature_iterator, label_iterator = tee(data_iterator, 2)
-        x_train = np.asarray([x for x, y in feature_iterator])
-        y_train = np.asarray([y for x, y in label_iterator])
+        x_train = []
+        y_train = []
+        for x, y in data_iterator:
+            x_train.append(x)
+            y_train.append(y)
+        x_train = np.asarray(x_train)
+        y_train = np.asarray(y_train)
+        # feature_iterator, label_iterator = tee(data_iterator, 2)
+        # x_train = np.asarray([x for x, y in feature_iterator])
+        # y_train = np.asarray([y for x, y in label_iterator])
 
         self.model.compile(optimizer=get_optimizer(self.master_optimizer),
                            loss=self.master_loss,
