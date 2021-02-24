@@ -28,8 +28,8 @@ def df_to_simple_rdd(df, categorical=False, nb_classes=None, features_col='featu
     sql_context.registerDataFrameAsTable(df, "temp_table")
     selected_df = sql_context.sql(
         "SELECT {0} AS features, {1} as label from temp_table".format(features_col, label_col))
-    lp_rdd = selected_df.rdd.map(
-        lambda row: LabeledPoint(row.label, row.features))
+    lp_rdd = selected_df.rdd.map(lambda row: LabeledPoint(
+        row.label, MLLibVectors.fromML(row.features)))
     # if isinstance(selected_df.first().features, MLLibVector):
     #     lp_rdd = selected_df.rdd.map(
     #         lambda row: LabeledPoint(row.label, row.features))
