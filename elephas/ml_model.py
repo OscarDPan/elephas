@@ -189,7 +189,9 @@ class ElephasTransformer(Model, HasKerasModelConfig, HasLabelCol, HasOutputCol, 
         """
         output_col = self.getOutputCol()
         new_schema = copy.deepcopy(df.schema)
-        rdd = df.rdd.map(lambda x: from_vector(x[self.getFeaturesCol()])).repartition(5)
+        rdd = df.rdd.map(
+            lambda x: (x, from_vector(x[self.getFeaturesCol()]))
+        ).repartition(5)
         weights = rdd.ctx.broadcast(self.weights)
 
         def extract_features_and_predict(model_yaml: str,
@@ -202,7 +204,7 @@ class ElephasTransformer(Model, HasKerasModelConfig, HasLabelCol, HasOutputCol, 
             model.set_weights(weights.value)
             predict_function = determine_predict_function(model, model_type, predict_classes)
             #return predict_function(np.asarray([from_vector(x[features_col]) for x in data]))
-            return predict_function(np.asarray([row for row in data]))
+            return predict_function(np.asarray([row[1] for row in data]))
 
         predictions = rdd.mapPartitions(
             partial(extract_features_and_predict,
@@ -219,7 +221,7 @@ class ElephasTransformer(Model, HasKerasModelConfig, HasLabelCol, HasOutputCol, 
             # we're doing classification and predicting class probabilities
             predictions = predictions.map(lambda x: tuple([x.tolist()]))
             output_col_field = StructField(output_col, ArrayType(DoubleType()), True)
-        results_rdd = rdd.zip(predictions).map(lambda x: x[0] + x[1])
+        results_rdd = rdd.zip(predictions).map(lambda x: x[0][0] + x[1])
 
         new_schema.add(output_col_field)
         results_df = df.sql_ctx.createDataFrame(results_rdd, new_schema)
