@@ -218,9 +218,11 @@ class ElephasTransformer(Model, HasKerasModelConfig, HasLabelCol, HasOutputCol, 
             predictions = predictions.map(lambda x: tuple([float(x)]))
             output_col_field = StructField(output_col, DoubleType(), True)
         else:
+            predictions = predictions.map(lambda x: tuple([float(x)]))
+            output_col_field = StructField(output_col, DoubleType(), True)
             # we're doing classification and predicting class probabilities
-            predictions = predictions.map(lambda x: tuple([x.tolist()]))
-            output_col_field = StructField(output_col, ArrayType(DoubleType()), True)
+            # predictions = predictions.map(lambda x: tuple([x.tolist()]))
+            # output_col_field = StructField(output_col, ArrayType(DoubleType()), True)
         results_rdd = rdd.zip(predictions).map(lambda x: x[0][0] + x[1])
 
         new_schema.add(output_col_field)
