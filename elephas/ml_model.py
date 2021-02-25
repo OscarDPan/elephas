@@ -189,7 +189,7 @@ class ElephasTransformer(Model, HasKerasModelConfig, HasLabelCol, HasOutputCol, 
         """
         output_col = self.getOutputCol()
         new_schema = copy.deepcopy(df.schema)
-        rdd = df.rdd
+        rdd = df.rdd.map(lambda x: from_vector(x[self.getFeaturesCol()])).repartition(5)
         weights = rdd.ctx.broadcast(self.weights)
 
         def extract_features_and_predict(model_yaml: str,
@@ -201,7 +201,8 @@ class ElephasTransformer(Model, HasKerasModelConfig, HasLabelCol, HasOutputCol, 
             model = model_from_yaml(model_yaml, custom_objects)
             model.set_weights(weights.value)
             predict_function = determine_predict_function(model, model_type, predict_classes)
-            return predict_function(np.asarray([from_vector(x[features_col]) for x in data]))
+            #return predict_function(np.asarray([from_vector(x[features_col]) for x in data]))
+            return predict_function(np.asarray([row for row in data]))
 
         predictions = rdd.mapPartitions(
             partial(extract_features_and_predict,
