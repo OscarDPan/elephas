@@ -214,7 +214,7 @@ class ElephasTransformer(Model, HasKerasModelConfig, HasLabelCol, HasOutputCol, 
             tmp_features_col = f"{features_col}_as_array"
             df = df.withColumn(tmp_features_col, to_array(col(features_col)))
             df = df.withColumn(output_col, predict_pandas_udf(col(tmp_features_col)))
-        elif features_dtypes == ArrayType(DoubleType).simpleString():
+        elif features_dtypes == ArrayType(DoubleType()).simpleString():
             df = df.withColumn(output_col, predict_pandas_udf(col(features_col)))
         return df
 
