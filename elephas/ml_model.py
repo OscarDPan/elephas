@@ -1,25 +1,23 @@
+import copy
+import json
 import warnings
 from functools import partial
 
-import numpy as np
-import copy
 import h5py
-import json
-
-from pyspark.ml.param.shared import HasOutputCol, HasFeaturesCol, HasLabelCol
+import numpy as np
 from pyspark import keyword_only
 from pyspark.ml import Estimator, Model
+from pyspark.ml.param.shared import HasOutputCol, HasFeaturesCol, HasLabelCol
 from pyspark.sql import DataFrame
-from pyspark.sql.types import DoubleType, StructField, ArrayType
-
+from pyspark.sql.types import DoubleType, StructField, ArrayType, FloatType
 from tensorflow.keras.models import model_from_yaml
 from tensorflow.keras.optimizers import get as get_optimizer
 
+from .ml.adapter import df_to_simple_rdd
+from .ml.params import *
 from .mllib import from_vector
 from .spark_model import SparkModel
 from .utils.model_utils import LossModelTypeMapper, ModelType, determine_predict_function, ModelTypeEncoder, as_enum
-from .ml.adapter import df_to_simple_rdd
-from .ml.params import *
 from .utils.warnings import ElephasWarning
 
 
@@ -198,19 +196,28 @@ class ElephasTransformer(Model, HasKerasModelConfig, HasLabelCol, HasOutputCol, 
                                          features_col: str,
                                          model_type: ModelType,
                                          predict_classes: bool,
-                                         data):
+                                         features_dtype: str,
+                                         data
+                                         ):
             model = model_from_yaml(model_yaml, custom_objects)
             model.set_weights(weights.value)
             predict_function = determine_predict_function(model, model_type, predict_classes)
-            return predict_function(np.stack([from_vector(x[features_col]) for x in data]))
+            if features_dtype in [ArrayType(DoubleType()).simpleString(), ArrayType(FloatType()).simpleString()]:
+                return predict_function(np.asarray([x for x in data]))
+            else:
+                return predict_function(np.stack([from_vector(x[features_col]) for x in data]))
 
+        features_dtype = dict(df.dtypes)[self.getFeaturesCol()]
         predictions = rdd.mapPartitions(
             partial(extract_features_and_predict,
                     self.get_keras_model_config(),
                     self.get_custom_objects(),
                     self.getFeaturesCol(),
                     self.model_type,
-                    self.get_predict_classes()))
+                    self.get_predict_classes(),
+                    features_dtype
+                    ),
+        )
         if (self.model_type == ModelType.CLASSIFICATION and self.get_predict_classes()) \
                 or self.model_type == ModelType.REGRESSION:
             predictions = predictions.map(lambda x: tuple([float(x)]))
