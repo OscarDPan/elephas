@@ -7,7 +7,7 @@ from pyspark import keyword_only
 from pyspark.ml import Estimator, Model
 from pyspark.ml.param.shared import HasOutputCol, HasFeaturesCol, HasLabelCol
 from pyspark.sql import DataFrame
-from pyspark.sql.types import DoubleType, ArrayType
+from pyspark.sql.types import DoubleType, ArrayType, FloatType
 from tensorflow.keras.models import model_from_yaml
 from tensorflow.keras.optimizers import get as get_optimizer
 
@@ -214,7 +214,7 @@ class ElephasTransformer(Model, HasKerasModelConfig, HasLabelCol, HasOutputCol, 
             tmp_features_col = f"{features_col}_as_array"
             df = df.withColumn(tmp_features_col, to_array(col(features_col)))
             df = df.withColumn(output_col, predict_pandas_udf(col(tmp_features_col)))
-        elif features_dtypes == ArrayType(DoubleType()).simpleString():
+        elif features_dtypes in [ArrayType(DoubleType()).simpleString(), ArrayType(FloatType()).simpleString()]:
             df = df.withColumn(output_col, predict_pandas_udf(col(features_col)))
         return df
 
