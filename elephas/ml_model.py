@@ -1,25 +1,20 @@
-import warnings
-from functools import partial
-
-import numpy as np
-import copy
-import h5py
 import json
+import warnings
 
-from pyspark.ml.param.shared import HasOutputCol, HasFeaturesCol, HasLabelCol
+import h5py
+import numpy as np
 from pyspark import keyword_only
 from pyspark.ml import Estimator, Model
+from pyspark.ml.param.shared import HasOutputCol, HasFeaturesCol, HasLabelCol
 from pyspark.sql import DataFrame
-from pyspark.sql.types import DoubleType, StructField, ArrayType
-
+from pyspark.sql.types import DoubleType, ArrayType
 from tensorflow.keras.models import model_from_yaml
 from tensorflow.keras.optimizers import get as get_optimizer
 
-from .mllib import from_vector
-from .spark_model import SparkModel
-from .utils.model_utils import LossModelTypeMapper, ModelType, determine_predict_function, ModelTypeEncoder, as_enum
 from .ml.adapter import df_to_simple_rdd
 from .ml.params import *
+from .spark_model import SparkModel
+from .utils.model_utils import LossModelTypeMapper, ModelType, determine_predict_function, ModelTypeEncoder, as_enum
 from .utils.warnings import ElephasWarning
 
 
@@ -188,23 +183,40 @@ class ElephasTransformer(Model, HasKerasModelConfig, HasLabelCol, HasOutputCol, 
     def _transform(self, df):
         """Private transform method of a Transformer. This serves as batch-prediction method for our purposes.
         """
+        from pyspark.ml.linalg import Vector, VectorUDT
         from pyspark.sql.functions import pandas_udf, col, udf
         import pandas as pd
+        @udf(returnType=ArrayType(DoubleType()))
+        def _iterable_to_list(obj):
+            if isinstance(obj, Vector):
+                return obj.toArray().tolist()
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, list):
+                return obj
+            else:
+                raise TypeError(f"spark_row_iterator_to_np: Cannot convert object of type {type(obj)} to numpy array")
+
         @pandas_udf(returnType=ArrayType(DoubleType()))
         def predict_pandas_udf(sparse_features: pd.Series) -> pd.Series:
-            features_col = self.getFeaturesCol()
             series_as_np = sparse_features.to_numpy().reshape(-1, 1)
             x = np.apply_along_axis(lambda x: x[0], 1, series_as_np)
             model = model_from_yaml(self.get_keras_model_config(), self.get_custom_objects())
             model.set_weights(self.weights.value)
             predict_function = determine_predict_function(model, self.model_type, self.get_predict_classes())
             return pd.Series(predict_function(x).tolist())
+
         output_col = self.getOutputCol()
+        features_col = self.getFeaturesCol()
         to_array = udf(lambda feature: feature.toArray().tolist(), returnType=ArrayType(DoubleType()))
-        tmp_feature_col = f"{self.getFeaturesCol()}_as_array"
-        df = df.withColumn(tmp_feature_col, to_array(col(self.getFeaturesCol())))
-        results_df = df.withColumn(output_col, predict_pandas_udf(col(tmp_feature_col)))
-        return results_df
+        features_dtypes = dict(df.dtypes)[features_col]
+        if features_dtypes == VectorUDT().simpleString():
+            tmp_features_col = f"{features_col}_as_array"
+            df = df.withColumn(tmp_features_col, to_array(col(features_col)))
+            df = df.withColumn(output_col, predict_pandas_udf(col(tmp_features_col)))
+        elif features_dtypes == ArrayType(DoubleType).simpleString():
+            df = df.withColumn(output_col, predict_pandas_udf(col(features_col)))
+        return df
 
 
 def load_ml_transformer(file_name: str):
