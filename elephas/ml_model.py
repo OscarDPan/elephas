@@ -188,42 +188,22 @@ class ElephasTransformer(Model, HasKerasModelConfig, HasLabelCol, HasOutputCol, 
     def _transform(self, df):
         """Private transform method of a Transformer. This serves as batch-prediction method for our purposes.
         """
+        from pyspark.sql.functions import pandas_udf, col, udf
+        import pandas as pd
+        @pandas_udf(returnType=ArrayType(DoubleType()))
+        def predict_pandas_udf(sparse_features: pd.Series) -> pd.Series:
+            features_col = self.getFeaturesCol()
+            series_as_np = sparse_features.to_numpy().reshape(-1, 1)
+            x = np.apply_along_axis(lambda x: x[0], 1, series_as_np)
+            model = model_from_yaml(self.get_keras_model_config(), self.get_custom_objects())
+            model.set_weights(self.weights.value)
+            predict_function = determine_predict_function(model, self.model_type, self.get_predict_classes())
+            return pd.Series(predict_function(x).tolist())
         output_col = self.getOutputCol()
-        new_schema = copy.deepcopy(df.schema)
-        rdd = df.rdd
-        weights = self.weights
-
-        def extract_features_and_predict(model_yaml: str,
-                                         custom_objects: dict,
-                                         features_col: str,
-                                         model_type: ModelType,
-                                         predict_classes: bool,
-                                         data):
-            model = model_from_yaml(model_yaml, custom_objects)
-            model.set_weights(weights.value)
-            predict_function = determine_predict_function(model, model_type, predict_classes)
-            return predict_function(np.stack([from_vector(x[features_col]) for x in data]))
-
-        predictions = rdd.mapPartitions(
-            partial(extract_features_and_predict,
-                    self.get_keras_model_config(),
-                    self.get_custom_objects(),
-                    self.getFeaturesCol(),
-                    self.model_type,
-                    self.get_predict_classes()))
-        if (self.model_type == ModelType.CLASSIFICATION and self.get_predict_classes()) \
-                or self.model_type == ModelType.REGRESSION:
-            predictions = predictions.map(lambda x: tuple([float(x)]))
-            output_col_field = StructField(output_col, DoubleType(), True)
-        else:
-            # we're doing classification and predicting class probabilities
-            predictions = predictions.map(lambda x: tuple([x.tolist()]))
-            output_col_field = StructField(output_col, ArrayType(DoubleType()), True)
-        results_rdd = rdd.zip(predictions).map(lambda x: x[0] + x[1])
-
-        new_schema.add(output_col_field)
-        results_df = df.sql_ctx.createDataFrame(results_rdd, new_schema)
-
+        to_array = udf(lambda feature: feature.toArray().tolist(), returnType=ArrayType(DoubleType()))
+        tmp_feature_col = f"{self.getFeaturesCol()}_as_array"
+        df = df.withColumn(tmp_feature_col, to_array(col(self.getFeaturesCol())))
+        results_df = df.withColumn(output_col, predict_pandas_udf(col(tmp_feature_col)))
         return results_df
 
 
